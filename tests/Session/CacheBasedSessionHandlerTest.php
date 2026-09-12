@@ -4,7 +4,7 @@ namespace Illuminate\Tests\Session;
 
 use Illuminate\Contracts\Cache\Repository as CacheContract;
 use Illuminate\Session\CacheBasedSessionHandler;
-use Mockery as m;
+use Mockery;
 use PHPUnit\Framework\TestCase;
 
 class CacheBasedSessionHandlerTest extends TestCase
@@ -15,8 +15,7 @@ class CacheBasedSessionHandlerTest extends TestCase
 
     protected function setUp(): void
     {
-        parent::setUp();
-        $this->cacheMock = m::mock(CacheContract::class);
+        $this->cacheMock = Mockery::mock(CacheContract::class);
         $this->sessionHandler = new CacheBasedSessionHandler(cache: $this->cacheMock, minutes: 10);
     }
 
@@ -32,25 +31,40 @@ class CacheBasedSessionHandlerTest extends TestCase
         $this->assertTrue($result);
     }
 
+    public function test_it_creates_session_ids()
+    {
+        $sessionId = $this->sessionHandler->create_sid();
+
+        $this->assertIsString($sessionId);
+        $this->assertNotEmpty($sessionId);
+    }
+
+    public function test_validate_id_checks_cache()
+    {
+        $this->cacheMock->expects('has')->with('session_id')->andReturn(true);
+
+        $this->assertTrue($this->sessionHandler->validateId('session_id'));
+    }
+
     public function test_read_returns_data_from_cache()
     {
-        $this->cacheMock->shouldReceive('get')->once()->with('session_id', '')->andReturn('session_data');
+        $this->cacheMock->expects('get')->with('session_id', '')->andReturn('session_data');
 
         $data = $this->sessionHandler->read(sessionId: 'session_id');
-        $this->assertEquals('session_data', $data);
+        $this->assertSame('session_data', $data);
     }
 
     public function test_read_returns_empty_string_if_no_data()
     {
-        $this->cacheMock->shouldReceive('get')->once()->with('some_id', '')->andReturn('');
+        $this->cacheMock->expects('get')->with('some_id', '')->andReturn('');
 
         $data = $this->sessionHandler->read(sessionId: 'some_id');
-        $this->assertEquals('', $data);
+        $this->assertSame('', $data);
     }
 
     public function test_write_stores_data_in_cache()
     {
-        $this->cacheMock->shouldReceive('put')->once()->with('session_id', 'session_data', 600) // 10 minutes in seconds
+        $this->cacheMock->expects('put')->with('session_id', 'session_data', 600) // 10 minutes in seconds
             ->andReturn(true);
 
         $result = $this->sessionHandler->write(sessionId: 'session_id', data: 'session_data');
@@ -60,7 +74,7 @@ class CacheBasedSessionHandlerTest extends TestCase
 
     public function test_destroy_removes_data_from_cache()
     {
-        $this->cacheMock->shouldReceive('forget')->once()->with('session_id')->andReturn(true);
+        $this->cacheMock->expects('forget')->with('session_id')->andReturn(true);
 
         $result = $this->sessionHandler->destroy(sessionId: 'session_id');
 

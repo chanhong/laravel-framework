@@ -51,9 +51,13 @@ class PhpRedisConnector implements Connector
     {
         $options = array_merge($options, $clusterOptions, Arr::pull($config, 'options', []));
 
-        return new PhpRedisClusterConnection($this->createRedisClusterInstance(
+        $connector = fn () => $this->createRedisClusterInstance(
             array_map($this->buildClusterConnectionString(...), $config), $options
-        ));
+        );
+
+        return new PhpRedisClusterConnection($connector(), $connector, array_merge($config, [
+            'command_retries' => (int) Arr::get($options, 'command_retries', 0),
+        ]));
     }
 
     /**
@@ -202,12 +206,14 @@ class PhpRedisConnector implements Connector
             isset($options['persistent']) && $options['persistent'],
         ];
 
-        if (version_compare(phpversion('redis'), '4.3.0', '>=')) {
-            $parameters[] = $options['password'] ?? null;
-        }
+        if (version_compare(phpversion('redis'), '5.3.2', '>=')) {
+            $parameters[] = $this->formatClusterPassword($options);
 
-        if (version_compare(phpversion('redis'), '5.3.2', '>=') && ! is_null($context = Arr::get($options, 'context'))) {
-            $parameters[] = $this->normalizeClusterContext($context);
+            if (! is_null($context = Arr::get($options, 'context'))) {
+                $parameters[] = $this->normalizeClusterContext($context);
+            }
+        } elseif (version_compare(phpversion('redis'), '4.3.0', '>=')) {
+            $parameters[] = $options['password'] ?? null;
         }
 
         return tap(new RedisCluster(...$parameters), function ($client) use ($options) {
@@ -238,6 +244,22 @@ class PhpRedisConnector implements Connector
             if (! empty($options['tcp_keepalive'])) {
                 $client->setOption(Redis::OPT_TCP_KEEPALIVE, $options['tcp_keepalive']);
             }
+
+            if (array_key_exists('max_retries', $options)) {
+                $client->setOption(Redis::OPT_MAX_RETRIES, $options['max_retries']);
+            }
+
+            if (array_key_exists('backoff_algorithm', $options)) {
+                $client->setOption(Redis::OPT_BACKOFF_ALGORITHM, $this->parseBackoffAlgorithm($options['backoff_algorithm']));
+            }
+
+            if (array_key_exists('backoff_base', $options)) {
+                $client->setOption(Redis::OPT_BACKOFF_BASE, $options['backoff_base']);
+            }
+
+            if (array_key_exists('backoff_cap', $options)) {
+                $client->setOption(Redis::OPT_BACKOFF_CAP, $options['backoff_cap']);
+            }
         });
     }
 
@@ -249,11 +271,27 @@ class PhpRedisConnector implements Connector
      */
     protected function formatHost(array $options)
     {
-        if (isset($options['scheme'])) {
-            return Str::start($options['host'], "{$options['scheme']}://");
+        $host = $options['host'] ?? null;
+
+        if (! is_string($host) || $host === '') {
+            throw new InvalidArgumentException('Redis host must be a non-empty string.');
         }
 
-        return $options['host'];
+        $hostScheme = parse_url($host, PHP_URL_SCHEME);
+
+        if (isset($options['scheme'])) {
+            if (is_string($hostScheme)) {
+                if (strcasecmp($hostScheme, $options['scheme']) !== 0) {
+                    throw new InvalidArgumentException('The scheme configured in the Redis host option must match the scheme option.');
+                }
+
+                return $host;
+            }
+
+            return Str::start($host, "{$options['scheme']}://");
+        }
+
+        return $host;
     }
 
     /**
@@ -296,6 +334,23 @@ class PhpRedisConnector implements Connector
         }
 
         return $context;
+    }
+
+    /**
+     * Format the password for a Redis cluster connection.
+     *
+     * @param  array  $options
+     * @return string|array|null
+     */
+    protected function formatClusterPassword(array $options)
+    {
+        $password = $options['password'] ?? null;
+
+        if (isset($options['username']) && $options['username'] !== '' && is_string($password)) {
+            return [$options['username'], $password];
+        }
+
+        return $password;
     }
 
     /**

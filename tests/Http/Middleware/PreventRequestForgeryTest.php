@@ -10,7 +10,7 @@ use Illuminate\Http\Exceptions\OriginMismatchException;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Session\TokenMismatchException;
-use Mockery as m;
+use Mockery;
 use PHPUnit\Framework\TestCase;
 
 class PreventRequestForgeryTest extends TestCase
@@ -18,8 +18,6 @@ class PreventRequestForgeryTest extends TestCase
     protected function tearDown(): void
     {
         PreventRequestForgery::flushState();
-
-        parent::tearDown();
     }
 
     public function test_same_origin_header_passes()
@@ -29,7 +27,7 @@ class PreventRequestForgeryTest extends TestCase
 
         $response = $middleware->handle($request, fn () => new Response('OK'));
 
-        $this->assertEquals('OK', $response->getContent());
+        $this->assertSame('OK', $response->getContent());
     }
 
     public function test_same_site_header_rejected_by_default()
@@ -51,7 +49,7 @@ class PreventRequestForgeryTest extends TestCase
 
         $response = $middleware->handle($request, fn () => new Response('OK'));
 
-        $this->assertEquals('OK', $response->getContent());
+        $this->assertSame('OK', $response->getContent());
     }
 
     public function test_cross_site_with_valid_token_passes()
@@ -61,7 +59,7 @@ class PreventRequestForgeryTest extends TestCase
 
         $response = $middleware->handle($request, fn () => new Response('OK'));
 
-        $this->assertEquals('OK', $response->getContent());
+        $this->assertSame('OK', $response->getContent());
     }
 
     public function test_cross_site_without_token_fails()
@@ -118,7 +116,7 @@ class PreventRequestForgeryTest extends TestCase
 
         $response = $middleware->handle($request, fn () => new Response('OK'));
 
-        $this->assertEquals('OK', $response->getContent());
+        $this->assertSame('OK', $response->getContent());
     }
 
     protected function createRequest(array $server = [], ?string $token = null)
@@ -132,7 +130,7 @@ class PreventRequestForgeryTest extends TestCase
             $server
         );
 
-        $session = m::mock(Session::class);
+        $session = Mockery::mock(Session::class);
         $session->shouldReceive('token')->andReturn('test-token');
         $request->setLaravelSession($session);
 
@@ -142,8 +140,8 @@ class PreventRequestForgeryTest extends TestCase
     protected function createMiddleware()
     {
         return new PreventRequestForgeryTestStub(
-            m::mock(Application::class),
-            m::mock(Encrypter::class)
+            Mockery::mock(Application::class),
+            Mockery::mock(Encrypter::class)
         );
     }
 }

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Tests\Integration\Database\Fixtures\Post;
+use Illuminate\Tests\Database\Fixtures\Models\Integration\Post;
 use Illuminate\Tests\Integration\Database\Fixtures\PostStringyKey;
 
 class EloquentDeleteTest extends DatabaseTestCase
@@ -133,7 +133,7 @@ class EloquentDeleteTest extends DatabaseTestCase
         $post = Post::query()->create([]);
         $result = $post->deleteQuietly();
 
-        $this->assertEquals('\(^_^)/', $_SERVER['(-_-)']);
+        $this->assertSame('\(^_^)/', $_SERVER['(-_-)']);
         $this->assertTrue($result);
         $this->assertFalse($post->exists);
 
@@ -144,7 +144,7 @@ class EloquentDeleteTest extends DatabaseTestCase
         $role = Role::create([]);
         $result = $role->deleteQuietly();
         $this->assertTrue($result);
-        $this->assertEquals('\(^_^)/', $_SERVER['(-_-)']);
+        $this->assertSame('\(^_^)/', $_SERVER['(-_-)']);
 
         unset($_SERVER['(-_-)']);
     }

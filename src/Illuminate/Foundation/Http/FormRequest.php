@@ -15,7 +15,6 @@ use Illuminate\Foundation\Http\Attributes\RedirectToRoute;
 use Illuminate\Foundation\Http\Attributes\StopOnFirstFailure;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Redirector;
-use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidatesWhenResolvedTrait;
 use ReflectionClass;
 
@@ -102,7 +101,7 @@ class FormRequest extends Request implements ValidatesWhenResolved
         $factory = $this->container->make(ValidationFactory::class);
 
         if (method_exists($this, 'validator')) {
-            $validator = $this->container->call($this->validator(...), compact('factory'));
+            $validator = $this->container->call($this->validator(...), ['factory' => $factory]);
         } else {
             $validator = $this->createDefaultValidator($factory);
         }
@@ -138,25 +137,25 @@ class FormRequest extends Request implements ValidatesWhenResolved
     {
         $reflection = new ReflectionClass($this);
 
-        if (count($reflection->getAttributes(StopOnFirstFailure::class)) > 0) {
+        if ($reflection->getAttributes(StopOnFirstFailure::class) !== []) {
             $this->stopOnFirstFailure = true;
         }
 
         $redirectTo = $reflection->getAttributes(RedirectTo::class);
 
-        if (count($redirectTo) > 0) {
+        if ($redirectTo !== []) {
             $this->redirect = $redirectTo[0]->newInstance()->url;
         }
 
         $redirectToRoute = $reflection->getAttributes(RedirectToRoute::class);
 
-        if (count($redirectToRoute) > 0) {
+        if ($redirectToRoute !== []) {
             $this->redirectRoute = $redirectToRoute[0]->newInstance()->route;
         }
 
         $errorBag = $reflection->getAttributes(ErrorBag::class);
 
-        if (count($errorBag) > 0) {
+        if ($errorBag !== []) {
             $this->errorBag = $errorBag[0]->newInstance()->name;
         }
     }
@@ -231,13 +230,41 @@ class FormRequest extends Request implements ValidatesWhenResolved
     {
         $allowedKeys = array_keys($this->validationRules());
 
-        foreach (array_keys(Arr::dot($this->all())) as $inputKey) {
+        $input = $this->isJson() ? $this->json()->all() : $this->request->all();
+
+        foreach ($this->dotInputKeys($input) as $inputKey) {
             if (! $this->isKnownField($inputKey, $allowedKeys)) {
+                $inputKey = str_replace('\.', '.', $inputKey);
+
                 $validator->errors()->add($inputKey, trans('validation.prohibited', [
                     'attribute' => str_replace('_', ' ', $inputKey),
                 ]));
             }
         }
+    }
+
+    /**
+     * Flatten the given input's keys into dot notation, escaping literal dots within keys.
+     *
+     * @param  array  $input
+     * @param  string  $prefix
+     * @return array
+     */
+    protected function dotInputKeys(array $input, string $prefix = ''): array
+    {
+        $keys = [];
+
+        foreach ($input as $key => $value) {
+            $key = $prefix.str_replace('.', '\.', (string) $key);
+
+            if (is_array($value) && $value !== []) {
+                $keys = array_merge($keys, $this->dotInputKeys($value, $key.'.'));
+            } else {
+                $keys[] = $key;
+            }
+        }
+
+        return $keys;
     }
 
     /**
@@ -254,8 +281,13 @@ class FormRequest extends Request implements ValidatesWhenResolved
                 return true;
             }
 
+            if (str_ends_with($inputKey, '_confirmation') &&
+                $ruleKey === substr($inputKey, 0, -13)) {
+                return true;
+            }
+
             if (str_contains($ruleKey, '*')) {
-                $pattern = '/^'.str_replace('\*', '[^.]+', preg_quote($ruleKey, '/')).'$/';
+                $pattern = '/^'.str_replace('\*', '(?:[^.\\\\]|\\\\.)+', preg_quote($ruleKey, '/')).'$/';
 
                 if (preg_match($pattern, $inputKey)) {
                     return true;
@@ -292,15 +324,12 @@ class FormRequest extends Request implements ValidatesWhenResolved
     {
         $url = $this->redirector->getUrlGenerator();
 
-        if ($this->redirect) {
-            return $url->to($this->redirect);
-        } elseif ($this->redirectRoute) {
-            return $url->route($this->redirectRoute);
-        } elseif ($this->redirectAction) {
-            return $url->action($this->redirectAction);
-        }
-
-        return $url->previous();
+        return match (true) {
+            ! empty($this->redirect) => $url->to($this->redirect),
+            ! empty($this->redirectRoute) => $url->route($this->redirectRoute),
+            ! empty($this->redirectAction) => $url->action($this->redirectAction),
+            default => $url->previous(),
+        };
     }
 
     /**
@@ -336,8 +365,10 @@ class FormRequest extends Request implements ValidatesWhenResolved
     /**
      * Get a validated input container for the validated input.
      *
-     * @param  array|null  $keys
-     * @return \Illuminate\Support\ValidatedInput|array
+     * @param  array<int, string>|null  $keys
+     * @return ($keys is array ? array<string, mixed> : \Illuminate\Support\ValidatedInput)
+     *
+     * @throws \Illuminate\Validation\ValidationException
      */
     public function safe(?array $keys = null)
     {
